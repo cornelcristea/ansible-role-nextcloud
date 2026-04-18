@@ -1,0 +1,71 @@
+---
+services:
+  nextcloud:
+    image: lscr.io/linuxserver/nextcloud:{{ nextcloud_version }}
+    container_name: nextcloud
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - PUID={{ nextcloud_puid }}
+      - PGID={{ nextcloud_pgid }}
+      - TZ={{ nextcloud_timezone }}
+    volumes:
+      - {{ nextcloud_host_volume }}:/config
+      - {{ nextcloud_data_volume }}:/data
+    ports:
+      - {{ nextcloud_https_port }}:443
+      - {{ nextcloud_http_port }}:80
+    depends_on:
+      - mariadb
+      - redis
+
+  mariadb:
+    image: lscr.io/linuxserver/mariadb:{{ nextcloud_mariadb_version }}
+    container_name: nextcloud-mariadb
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - PUID={{ nextcloud_puid }}
+      - PGID={{ nextcloud_pgid }}
+      - TZ={{ nextcloud_timezone }}
+      - MYSQL_ROOT_PASSWORD={{ nextcloud_mariadb_root_password }}
+      - MYSQL_DATABASE={{ nextcloud_mariadb_database }}
+      - MYSQL_USER={{ nextcloud_mariadb_username }}
+      - MYSQL_PASSWORD={{ nextcloud_mariadb_password }}
+    volumes:
+      - {{ nextcloud_mariadb_volume }}:/config
+    ports:
+      - {{ nextcloud_mariadb_port }}:3306
+
+  # redis:
+  #   container_name: nextcloud-valkey
+  #   image: docker.io/valkey/valkey:{{ nextcloud_valkey_version }}
+  #   restart: unless-stopped
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+  #   healthcheck:
+  #     test: redis-cli ping || exit 1
+  #   volumes:
+  #     - "{{ immich_host_volume }}/redis:/data"
+
+  redis:
+    image: redis:{{ nextcloud_redis_version }}
+    container_name: nextcloud-redis
+    command: redis-server --requirepass redispass
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: nextcloud
+  description: Deploy Nextcloud service as docker container
+  author: cornelcristea
+
+  license: MIT
+
+  min_ansible_version: "2.18"
+
+  platforms:
+    - name: Debian
+      versions:
+        - all
+
+  galaxy_tags:
+    - nextcloud
+    - backup
+    - cloud
+    - docker
+    - media
+    - self-hosted

@@ -1,0 +1,30 @@
+---
+# tasks file for nextcloud
+
+- name: Create directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nextcloud_puid }}"
+    group: "{{ nextcloud_pgid }}"
+    mode: '0755'
+  with_items:
+    - "{{ nextcloud_host_volume }}"
+    - "{{ nextcloud_data_volume }}"
+    - "{{ nextcloud_mariadb_volume }}"
+
+- name: Generate docker compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ nextcloud_host_volume }}/docker-compose.yml"
+    owner: "{{ nextcloud_puid }}"
+    group: "{{ nextcloud_pgid }}"
+    mode: '0644'
+
+- name: Run docker compose
+  become: true
+  community.docker.docker_compose_v2:
+    project_src: "{{ nextcloud_host_volume }}"
+    state: present
+    remove_orphans: true
+    build: never

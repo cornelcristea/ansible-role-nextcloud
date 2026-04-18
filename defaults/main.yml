@@ -1,0 +1,38 @@
+---
+# defaults file for nextcloud
+
+# Timezone for the Nextcloud and MariaDB services
+nextcloud_timezone: UTC
+
+# Version tag for the Nextcloud Docker image from linuxserver.io
+nextcloud_version: 33.0.2-ls425
+
+# External HTTPS port to expose Nextcloud
+nextcloud_https_port: 443
+
+# External HTTP port to expose Nextcloud
+nextcloud_http_port: 80
+
+# Path to the Nextcloud data volume on the host
+nextcloud_data_volume: "{{ nextcloud_host_volume }}/data"
+
+# Version tag for the MariaDB Docker image from linuxserver.io
+nextcloud_mariadb_version: 11.4.9-r0-ls212
+
+# External port to expose MariaDB
+nextcloud_mariadb_port: 3306
+
+# Root password for the MariaDB database
+nextcloud_mariadb_root_password: ""
+
+# Name of the MariaDB database
+nextcloud_mariadb_database: nextcloud_database
+
+# Username for MariaDB database
+nextcloud_mariadb_username: ""
+
+# Password for the MariaDB database user
+nextcloud_mariadb_password: ""
+
+# Version tag for the Redis image from docker.io
+nextcloud_redis_version: 8.4.2-alpine3.22
