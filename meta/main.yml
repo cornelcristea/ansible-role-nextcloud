@@ -20,3 +20,8 @@ galaxy_info:
     - docker
     - media
     - self-hosted
+    - storage
+    - media
+    - photos
+    - documents
+    - files
