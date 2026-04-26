@@ -17,15 +17,23 @@ services:
       - {{ nextcloud_host_volume }}:/config
       - {{ nextcloud_data_volume }}:/data
     ports:
-      - {{ nextcloud_https_port }}:443
       - {{ nextcloud_http_port }}:80
+      - {{ nextcloud_https_port }}:443
     depends_on:
-      - mariadb
       - redis
+{% if nextcloud_db_type != 'sqlite3' %}
+      - database
+{% endif %}
 
-  mariadb:
+{% if nextcloud_db_type != 'sqlite3' %}
+  database:
+{% if nextcloud_db_type == 'mysql' %}
     image: lscr.io/linuxserver/mariadb:{{ nextcloud_mariadb_version }}
     container_name: nextcloud-mariadb
+{% elif nextcloud_db_type == 'pgsql' %}
+    image: postgres:{{ nextcloud_postgres_version }}
+    container_name: nextcloud-postgres
+{% endif %}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -33,39 +41,37 @@ services:
         max-size: "10m"
         max-file: "3"
     environment:
+{% if nextcloud_db_type == 'mysql' %}
       - PUID={{ nextcloud_puid }}
       - PGID={{ nextcloud_pgid }}
       - TZ={{ nextcloud_timezone }}
-      - MYSQL_ROOT_PASSWORD={{ nextcloud_mariadb_root_password }}
-      - MYSQL_DATABASE={{ nextcloud_mariadb_database }}
-      - MYSQL_USER={{ nextcloud_mariadb_username }}
-      - MYSQL_PASSWORD={{ nextcloud_mariadb_password }}
+      - MYSQL_ROOT_PASSWORD=${DATABASE_ROOT_PASSWORD}
+      - MYSQL_DATABASE={{ nextcloud_db_name }}
+      - MYSQL_USER={{ nextcloud_db_username }}
+      - MYSQL_PASSWORD=${DATABASE_PASSWORD}
     volumes:
-      - {{ nextcloud_mariadb_volume }}:/config
+      - {{ nextcloud_db_volume }}:/config
     ports:
-      - {{ nextcloud_mariadb_port }}:3306
-
-  # redis:
-  #   container_name: nextcloud-valkey
-  #   image: docker.io/valkey/valkey:{{ nextcloud_valkey_version }}
-  #   restart: unless-stopped
-  #   logging:
-  #     driver: json-file
-  #     options:
-  #       max-size: "10m"
-  #       max-file: "3"
-  #   healthcheck:
-  #     test: redis-cli ping || exit 1
-  #   volumes:
-  #     - "{{ immich_host_volume }}/redis:/data"
+      - {{ nextcloud_db_port }}:3306
+{% elif nextcloud_db_type == 'pgsql' %}
+      POSTGRES_USER={{ nextcloud_db_username }}
+      POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      POSTGRES_DB={{ nextcloud_db_name }}
+    volumes:
+      - "{{ nextcloud_db_volume }}:/var/lib/postgresql/data/"
+    ports:
+      - {{ nextcloud_db_port }}:5432
+{% endif %}
+{% endif %}
 
   redis:
     image: redis:{{ nextcloud_redis_version }}
     container_name: nextcloud-redis
-    command: redis-server --requirepass redispass
     restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    ports:
+      - "{{ nextcloud_redis_port }}:6379"
