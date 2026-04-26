@@ -92,8 +92,8 @@ We welcome contributions! Here’s how you can help improve this role:
 2. **Clone your fork locally**
 
   ```bash
-  git clone https://github.com/cornelcristea/ansible-role-immich.git
-  cd ansible-role-immich
+  git clone https://github.com/cornelcristea/ansible-role-nextcloud.git
+  cd ansible-role-nextcloud
   ```
 
 3. **Create a new branch**
