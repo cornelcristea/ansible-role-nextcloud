@@ -1,2 +1,11 @@
 ---
 # handlers file for nextcloud
+
+- name: Restart service
+  become: true
+  community.docker.docker_compose_v2:
+    project_src: "{{ nextcloud_host_volume }}"
+    state: restarted
+    services:
+      - nextcloud
+    build: never
