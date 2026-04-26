@@ -7,24 +7,288 @@
     state: directory
     owner: "{{ nextcloud_puid }}"
     group: "{{ nextcloud_pgid }}"
-    mode: '0755'
+    mode: "{{ '0770' if item == nextcloud_data_volume else '0775' }}"
   with_items:
     - "{{ nextcloud_host_volume }}"
     - "{{ nextcloud_data_volume }}"
-    - "{{ nextcloud_mariadb_volume }}"
+    - "{{ nextcloud_db_volume }}"
 
-- name: Generate docker compose file
-  template:
-    src: docker-compose.yml.j2
-    dest: "{{ nextcloud_host_volume }}/docker-compose.yml"
-    owner: "{{ nextcloud_puid }}"
-    group: "{{ nextcloud_pgid }}"
-    mode: '0644'
+- name: block - Docker compose tasks
+  block:
+    - name: Generate env file
+      template:
+        src: .env.j2
+        dest: "{{ nextcloud_host_volume }}/.env"
+        owner: "{{ nextcloud_puid }}"
+        group: "{{ nextcloud_pgid }}"
+        mode: '0644'
 
-- name: Run docker compose
+    - name: Generate docker compose file
+      template:
+        src: docker-compose.yml.j2
+        dest: "{{ nextcloud_host_volume }}/docker-compose.yml"
+        owner: "{{ nextcloud_puid }}"
+        group: "{{ nextcloud_pgid }}"
+        mode: '0644'
+
+    - name: Run docker compose
+      become: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ nextcloud_host_volume }}"
+        state: present
+        remove_orphans: true
+        build: never
+  tags: update_docker_compose
+
+- name: Wait until Nextcloud is up
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nextcloud_http_port }}/status.php"
+    return_content: true
+  register: nc_status
+  retries: 10
+  delay: 3
+  until: nc_status.status == 200
+
+- name: Check Nextcloud installation status
+  community.docker.docker_container_exec:
+    container: nextcloud
+    user: abc
+    command: php /app/www/public/occ status --output=json
+  register: nc_status
+  changed_when: false
+
+- name: Create admin user and configure database
   become: true
-  community.docker.docker_compose_v2:
-    project_src: "{{ nextcloud_host_volume }}"
-    state: present
-    remove_orphans: true
-    build: never
+  vars:
+    nc_installed: "{{ (nc_status.stdout | from_json).installed | default(false) }}"
+  community.docker.docker_container_exec:
+    container: nextcloud
+    user: abc
+    command: >
+      php /app/www/public/occ maintenance:install
+      --data-dir "/data"
+      --database "{{ nextcloud_db_type }}" 
+      --database-host "database:{{ nextcloud_db_port }}" 
+      --database-name "{{ nextcloud_db_name }}" 
+      --database-user "{{ nextcloud_db_username }}" 
+      --database-pass "{{ nextcloud_db_password }}" 
+      --admin-user "admin" 
+      --admin-pass "{{ nextcloud_admin_password }}"
+  when: not nc_installed
+
+- name: block - Redis configuration tasks
+  block:
+    - name: Check Redis configuration
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get redis host
+      register: nc_redis_host
+      changed_when: false
+      failed_when: false
+
+    - name: Configure Redis
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: >
+          bash -c "
+            php /app/www/public/occ config:system:set redis host --value='nextcloud-redis' &&
+            php /app/www/public/occ config:system:set redis port --value='{{ nextcloud_redis_port }}' --type=integer &&
+            php /app/www/public/occ config:system:set redis timeout --value='1.5' --type=double &&
+            php /app/www/public/occ config:system:set redis password --value='' &&
+            php /app/www/public/occ config:system:set memcache.local --value='\OC\Memcache\Redis' &&
+            php /app/www/public/occ config:system:set memcache.locking --value='\OC\Memcache\Redis'
+          "
+      when: nc_redis_host.stdout != 'nextcloud-redis'
+      changed_when: false
+
+- name: block - Trusted domains tasks
+  block:
+    - name: Get current trusted domains
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get trusted_domains --output=json
+      register: nc_trusted_domains
+      changed_when: false
+      failed_when: false
+
+    - name: Cleanup trusted domains list
+      become: true
+      vars:
+        trusted_domains_list: "{{ nextcloud_trusted_domains_default + nextcloud_trusted_domains }}"
+        trusted_domains_to_remove: >
+          {{ (nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json) 
+            | difference(trusted_domains_list) }}
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:delete trusted_domains
+      when: trusted_domains_to_remove | length > 0
+
+    - name: Refresh trusted domains list
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get trusted_domains --output=json
+      register: nc_trusted_domains
+      changed_when: false
+      failed_when: false
+
+    - name: Add trusted domains
+      become: true
+      vars:
+        nc_trusted_domains_list: "{{ nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json }}"
+        trusted_domains_list: "{{ nextcloud_trusted_domains_default + nextcloud_trusted_domains }}"
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: >
+          php /app/www/public/occ config:system:set trusted_domains {{ idx }} --value='{{ item }}'
+      loop: "{{ trusted_domains_list }}"
+      loop_control:
+        index_var: idx
+        label: "{{ item }}"
+      when: 
+        - item not in nc_trusted_domains_list
+  tags: 
+   - update_trusted_domains
+
+- name: block - Application management tasks
+  block:
+    - name: Get enabled apps
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ app:list --enabled --output=json
+      register: nc_apps
+      changed_when: false
+
+    - name: Set enabled apps fact
+      set_fact:
+        nc_apps_enabled: "{{ (nc_apps.stdout | from_json).enabled.keys() }}"
+
+    - name: Enable applications
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: "php /app/www/public/occ app:enable {{ item.key }}"
+      loop: "{{ nextcloud_applications | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - item.value
+        - item.key not in (nc_apps.stdout | from_json).enabled
+
+    - name: Disable applications
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: "php /app/www/public/occ app:disable {{ item.key }}"
+      loop: "{{ nextcloud_applications | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - not item.value
+        - item.key in (nc_apps.stdout | from_json).enabled
+
+    - name: Configure SMTP server
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: >
+          bash -c "
+            php /app/www/public/occ config:system:set mail_smtpmode --value='smtp' &&
+            php /app/www/public/occ config:system:set mail_sendmailmode --value='smtp' &&
+            php /app/www/public/occ config:system:set mail_smtphost --value='{{ nextcloud_smtp_host }}' &&
+            php /app/www/public/occ config:system:set mail_smtpport --value='{{ nextcloud_smtp_port }}' &&
+            php /app/www/public/occ config:system:set mail_smtpsecure --value='{{ nextcloud_smtp_encryption }}' &&
+            php /app/www/public/occ config:system:set mail_smtpauth --value='1' &&
+            php /app/www/public/occ config:system:set mail_smtpname --value='{{ nextcloud_smtp_user }}' &&
+            php /app/www/public/occ config:system:set mail_smtppassword --value='{{ nextcloud_smtp_password }}' &&
+            php /app/www/public/occ config:system:set mail_from_address --value='{{ nextcloud_smtp_from_address }}' &&
+            php /app/www/public/occ config:system:set mail_domain --value='{{ nextcloud_smtp_domain }}'
+          "
+      when: nextcloud_applications.mail
+  tags:
+    - update_apps
+
+- name: block - Users management task
+  block:
+    - name: Enable password policy
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ app:enable password_policy
+      when: nextcloud_password_policy_enabled
+      changed_when: false
+
+    - name: Disable password policy
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ app:disable password_policy
+      when: not nextcloud_password_policy_enabled
+      changed_when: false
+
+    - name: Get list of current users
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ user:list
+      register: nc_users
+      changed_when: false
+
+    - name: Add users
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        env:
+          OC_PASS: "{{ item.password }}"
+        command: >
+          bash -c "
+            php /app/www/public/occ user:add --password-from-env --display-name='{{ item.display_name | default('') }}' {{ item.username }} &&
+            php /app/www/public/occ user:setting {{ item.username }} settings email '{{ item.email | default('') }}'
+          "
+      loop: "{{ nextcloud_users }}"
+      loop_control:
+        label: "{{ item.username }}"
+      when: item.username not in nc_users.stdout
+
+    - name: Refresh user list
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ user:list --output=json
+      register: nc_users
+      changed_when: false
+
+    - name: Delete users
+      become: true
+      vars:
+        users_to_keep: "{{ (nextcloud_users | map(attribute='username') | list) + ['admin'] }}"
+        users_to_delete_json: >
+          {{ nc_users.stdout | from_json | dict2items | map(attribute='key') | list | difference(users_to_keep) | to_json }}
+        users_to_delete: "{{ users_to_delete_json | from_json }}"
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ user:delete {{ item }}
+      loop: "{{ users_to_delete }}"
+      loop_control:
+        label: "{{ item }}"
+      when: users_to_delete | length > 0
+  tags:
+    - update_users
