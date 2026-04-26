@@ -11,7 +11,7 @@ Ansible role to deploy **NextCloud** as docker container to have a self-hosted b
 ## Installation
 
 ```bash
-ansible-galaxy install cornelcristea.immich
+ansible-galaxy install cornelcristea.nextcloud
 ```
 
 ## Variables
@@ -41,6 +41,8 @@ The role uses the following variables:
   gather_facts: true
   vars:
     nextcloud_timezone: "America/New York"
+    nextcloud_trused_domains:
+      - nextcloud.homelab.internal
   roles:
     - cornelcristea.nextcloud
 ```
