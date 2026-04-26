@@ -1,8 +1,13 @@
 ---
 # vars file for nextcloud
 
-nextcloud_host_volume: /opt/nextcloud
-nextcloud_mariadb_volume: "{{ nextcloud_host_volume }}/mariadb"
-
 nextcloud_puid: 1000
 nextcloud_pgid: 1000
+
+nextcloud_host_volume: /opt/nextcloud
+
+nextcloud_db_volume: "{{ nextcloud_host_volume }}/db"
+
+nextcloud_trusted_domains_default:
+  - "{{ ansible_host }}"
+  - "{{ ansible_hostname }}"
