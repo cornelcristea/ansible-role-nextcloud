@@ -1,8 +1,15 @@
 ---
 # tasks file for nextcloud
 
+- name: Install necessary packages
+  ansible.builtin.apt:
+    name:
+      - ffmpeg
+    state: present
+    update-cache: true
+
 - name: Create directories
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: "{{ nextcloud_puid }}"
@@ -13,10 +20,11 @@
     - "{{ nextcloud_data_volume }}"
     - "{{ nextcloud_db_volume }}"
 
-- name: block - Docker compose tasks
+- name: Block - Docker compose tasks
+  tags: update_docker_compose
   block:
     - name: Generate env file
-      template:
+      ansible.builtin.template:
         src: .env.j2
         dest: "{{ nextcloud_host_volume }}/.env"
         owner: "{{ nextcloud_puid }}"
@@ -24,7 +32,7 @@
         mode: '0644'
 
     - name: Generate docker compose file
-      template:
+      ansible.builtin.template:
         src: docker-compose.yml.j2
         dest: "{{ nextcloud_host_volume }}/docker-compose.yml"
         owner: "{{ nextcloud_puid }}"
@@ -38,9 +46,8 @@
         state: present
         remove_orphans: true
         build: never
-  tags: update_docker_compose
 
-- name: Wait until Nextcloud is up
+- name: Wait until service is up
   ansible.builtin.uri:
     url: "http://localhost:{{ nextcloud_http_port }}/status.php"
     return_content: true
@@ -49,7 +56,7 @@
   delay: 3
   until: nc_status.status == 200
 
-- name: Check Nextcloud installation status
+- name: Check installation status
   community.docker.docker_container_exec:
     container: nextcloud
     user: abc
@@ -57,7 +64,7 @@
   register: nc_status
   changed_when: false
 
-- name: Create admin user and configure database
+- name: Setup admin user and database
   become: true
   vars:
     nc_installed: "{{ (nc_status.stdout | from_json).installed | default(false) }}"
@@ -67,16 +74,118 @@
     command: >
       php /app/www/public/occ maintenance:install
       --data-dir "/data"
-      --database "{{ nextcloud_db_type }}" 
-      --database-host "database:{{ nextcloud_db_port }}" 
-      --database-name "{{ nextcloud_db_name }}" 
-      --database-user "{{ nextcloud_db_username }}" 
-      --database-pass "{{ nextcloud_db_password }}" 
-      --admin-user "admin" 
+      --database "{{ nextcloud_db_type }}"
+      --database-host "database:{{ nextcloud_db_port }}"
+      --database-name "{{ nextcloud_db_name }}"
+      --database-user "{{ nextcloud_db_username }}"
+      --database-pass "{{ nextcloud_db_password }}"
+      --admin-user "admin"
       --admin-pass "{{ nextcloud_admin_password }}"
   when: not nc_installed
 
-- name: block - Redis configuration tasks
+- name: Block - Thumbail generation tasks
+  block:
+    - name: Check preview status
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get enable_previews
+      register: nc_preview
+      changed_when: false
+      failed_when: false
+
+    - name: Enable preview
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:set enable_previews --value=true
+      when: not nc_preview.stdout
+
+    - name: Get preview providers list
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get enabledPreviewProviders --output=json
+      register: nc_preview_providers
+      changed_when: false
+      failed_when: false
+
+    - name: Add preview providers
+      become: true
+      vars:
+        preview_providers_list: "{{ nc_preview_providers.stdout | default('[]') | regex_replace('^$', '[]') | from_json }}"
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:set enabledPreviewProviders {{ idx }} --value="{{ item }}"
+      loop: "{{ nextcloud_preview_providers }}"
+      loop_control:
+        index_var: idx
+        label: "{{ item }}"
+      when:
+        - item not in preview_providers_list
+
+- name: Block - SMTP configuration taks
+  tags: update_smtp
+  block:
+    - name: Check SMTP configuration
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get mail_smtpmode
+      register: nc_smtpmode
+      failed_when: false
+      changed_when: false
+
+    - name: Disable SMTP server
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: >
+          bash -c "
+            php /app/www/public/occ config:system:delete mail_smtpmode &&
+            php /app/www/public/occ config:system:delete mail_sendmailmode &&
+            php /app/www/public/occ config:system:delete mail_smtphost &&
+            php /app/www/public/occ config:system:delete mail_smtpport &&
+            php /app/www/public/occ config:system:delete mail_smtpsecure &&
+            php /app/www/public/occ config:system:delete mail_smtpauth &&
+            php /app/www/public/occ config:system:delete mail_smtpname &&
+            php /app/www/public/occ config:system:delete mail_smtppassword &&
+            php /app/www/public/occ config:system:delete mail_from_address &&
+            php /app/www/public/occ config:system:delete mail_domain
+          "
+      when:
+        - not nextcloud_smtp_enabled
+        - nc_smtpmode.stdout == 'smtp'
+
+    - name: Enable SMTP server
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: >
+          bash -c "
+            php /app/www/public/occ config:system:set mail_smtpmode --value='smtp' &&
+            php /app/www/public/occ config:system:set mail_sendmailmode --value='smtp' &&
+            php /app/www/public/occ config:system:set mail_smtphost --value='{{ nextcloud_smtp_host }}' &&
+            php /app/www/public/occ config:system:set mail_smtpport --value='{{ nextcloud_smtp_port }}' &&
+            php /app/www/public/occ config:system:set mail_smtpsecure --value='{{ nextcloud_smtp_encryption }}' &&
+            php /app/www/public/occ config:system:set mail_smtpauth --value='1' &&
+            php /app/www/public/occ config:system:set mail_smtpname --value='{{ nextcloud_smtp_user }}' &&
+            php /app/www/public/occ config:system:set mail_smtppassword --value='{{ nextcloud_smtp_password }}' &&
+            php /app/www/public/occ config:system:set mail_from_address --value='no-reply' &&
+            php /app/www/public/occ config:system:set mail_domain --value='{{ nextcloud_smtp_domain }}'
+          "
+      when:
+        - nextcloud_smtp_enabled
+        - nc_smtpmode.stdout != 'smtp'
+
+- name: Block - Redis configuration tasks
   block:
     - name: Check Redis configuration
       community.docker.docker_container_exec:
@@ -104,7 +213,8 @@
       when: nc_redis_host.stdout != 'nextcloud-redis'
       changed_when: false
 
-- name: block - Trusted domains tasks
+- name: Block - Trusted domains tasks
+  tags: update_trusted_domains
   block:
     - name: Get current trusted domains
       become: true
@@ -121,7 +231,7 @@
       vars:
         trusted_domains_list: "{{ nextcloud_trusted_domains_default + nextcloud_trusted_domains }}"
         trusted_domains_to_remove: >
-          {{ (nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json) 
+          {{ (nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json)
             | difference(trusted_domains_list) }}
       community.docker.docker_container_exec:
         container: nextcloud
@@ -153,12 +263,11 @@
       loop_control:
         index_var: idx
         label: "{{ item }}"
-      when: 
+      when:
         - item not in nc_trusted_domains_list
-  tags: 
-   - update_trusted_domains
 
-- name: block - Application management tasks
+- name: Block - Application management tasks
+  tags: update_apps
   block:
     - name: Get enabled apps
       community.docker.docker_container_exec:
@@ -168,9 +277,10 @@
       register: nc_apps
       changed_when: false
 
-    - name: Set enabled apps fact
-      set_fact:
+    - name: Set applications facts
+      ansible.builtin.set_fact:
         nc_apps_enabled: "{{ (nc_apps.stdout | from_json).enabled.keys() }}"
+        nc_apps_list: "{{ nextcloud_applications | dict2items }}"
 
     - name: Enable applications
       become: true
@@ -178,12 +288,12 @@
         container: nextcloud
         user: abc
         command: "php /app/www/public/occ app:enable {{ item.key }}"
-      loop: "{{ nextcloud_applications | dict2items }}"
+      loop: "{{ nc_apps_list }}"
       loop_control:
         label: "{{ item.key }}"
       when:
         - item.value
-        - item.key not in (nc_apps.stdout | from_json).enabled
+        - item.key not in nc_apps_enabled
 
     - name: Disable applications
       become: true
@@ -191,36 +301,15 @@
         container: nextcloud
         user: abc
         command: "php /app/www/public/occ app:disable {{ item.key }}"
-      loop: "{{ nextcloud_applications | dict2items }}"
+      loop: "{{ nc_apps_list }}"
       loop_control:
         label: "{{ item.key }}"
       when:
         - not item.value
-        - item.key in (nc_apps.stdout | from_json).enabled
+        - item.key in nc_apps_enabled
 
-    - name: Configure SMTP server
-      become: true
-      community.docker.docker_container_exec:
-        container: nextcloud
-        user: abc
-        command: >
-          bash -c "
-            php /app/www/public/occ config:system:set mail_smtpmode --value='smtp' &&
-            php /app/www/public/occ config:system:set mail_sendmailmode --value='smtp' &&
-            php /app/www/public/occ config:system:set mail_smtphost --value='{{ nextcloud_smtp_host }}' &&
-            php /app/www/public/occ config:system:set mail_smtpport --value='{{ nextcloud_smtp_port }}' &&
-            php /app/www/public/occ config:system:set mail_smtpsecure --value='{{ nextcloud_smtp_encryption }}' &&
-            php /app/www/public/occ config:system:set mail_smtpauth --value='1' &&
-            php /app/www/public/occ config:system:set mail_smtpname --value='{{ nextcloud_smtp_user }}' &&
-            php /app/www/public/occ config:system:set mail_smtppassword --value='{{ nextcloud_smtp_password }}' &&
-            php /app/www/public/occ config:system:set mail_from_address --value='{{ nextcloud_smtp_from_address }}' &&
-            php /app/www/public/occ config:system:set mail_domain --value='{{ nextcloud_smtp_domain }}'
-          "
-      when: nextcloud_applications.mail
-  tags:
-    - update_apps
-
-- name: block - Users management task
+- name: Block - Users management task
+  tags: update_users
   block:
     - name: Enable password policy
       become: true
@@ -290,5 +379,3 @@
       loop_control:
         label: "{{ item }}"
       when: users_to_delete | length > 0
-  tags:
-    - update_users
