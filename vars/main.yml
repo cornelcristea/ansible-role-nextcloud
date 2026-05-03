@@ -11,3 +11,9 @@ nextcloud_db_volume: "{{ nextcloud_host_volume }}/db"
 nextcloud_trusted_domains_default:
   - "{{ ansible_host }}"
   - "{{ ansible_hostname }}"
+
+nextcloud_preview_providers:
+  - "OC\\Preview\\TXT"
+  - "OC\\Preview\\Image"
+  - "OC\\Preview\\Movie"
+

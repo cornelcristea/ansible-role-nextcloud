@@ -1,8 +1,12 @@
 ---
 # defaults file for nextcloud
 
-# Timezone for Nextcloud (e.g. "UTC", "Europe/Berlin", etc.)
-nextcloud_timezone: UTC
+##################################
+####### General
+##################################
+
+# Timezone for Nextcloud (e.g. "Etc/UTC", "Europe/Berlin", etc.)
+nextcloud_timezone: Etc/UTC
 
 # Version tag for the Nextcloud Docker image from linuxserver.io
 nextcloud_version: 33.0.2-ls425
@@ -22,14 +26,14 @@ nextcloud_data_volume: "{{ nextcloud_host_volume }}/data"
 nextcloud_trusted_domains: []
 
 # Admin password for the initial Nextcloud setup
-# Use ansible vault to encrypt this variable in production environments
+# Use Ansible Vault to encrypt the passwords in production environments
 nextcloud_admin_password: admin
 
 # Enable or disable password policy (checking password strength, etc.)
 nextcloud_password_policy_enabled: false
 
 # List of additional Nextcloud users to create
-# Use ansible vault to encrypt the passwords for these users in production environments
+# Use Ansible Vault to encrypt the passwords in production environments
 # If 'nextcloud_password_policy_enabled' is true, password needs to be at least 10 characters long
 nextcloud_users:
   - username: john
@@ -51,7 +55,7 @@ nextcloud_applications:
   files_reminders: true
   firstrunwizard: true
   logreader: true
-  mail: false # required SMTP server to be configured
+  mail: false
   nextcloud_announcements: true
   notes: false
   photos: false
@@ -70,6 +74,13 @@ nextcloud_applications:
   weather_status: true
   webhook_listeners: true
 
+##################################
+####### SMTP Server
+##################################
+
+# Enable or disable SMTP server configuration
+nextcloud_smtp_enabled: false
+
 # SMTP server hostname or IP address used by Nextcloud to send emails.
 nextcloud_smtp_host: "smtp.example.com"
 
@@ -83,14 +94,15 @@ nextcloud_smtp_encryption: "tls"
 nextcloud_smtp_user: "user@example.com"
 
 # Password for the SMTP user account.
+# Use Ansible Vault to encrypt the passwords in production environments
 nextcloud_smtp_password: "yourpassword"
 
-# Local part of the "From" email address (before the @ symbol).
-# Example: "no-reply" → no-reply@example.com
-nextcloud_smtp_from_address: "no-reply"
-
 # Domain part of the "From" email address (after the @ symbol).
-nextcloud_smtp_domain: "example.com"
+nextcloud_smtp_domain: "nextcloud.example.com"
+
+##################################
+####### Database
+##################################
 
 # Database type for Nextcloud: sqlite3 (SQLite3), mysql (MariaDB), pgsql (PostgreSQL)
 nextcloud_db_type: mysql
@@ -113,12 +125,16 @@ nextcloud_db_port: 3306
 nextcloud_db_username: nextcloud
 
 # Password for the MariaDB database user
-# Use ansible vault to encrypt this variable in production environments
+# Use Ansible Vault to encrypt the passwords in production environments
 nextcloud_db_password: dbpass123
 
 # Root password for the MariaDB database
-# Use ansible vault to encrypt this variable in production environments
+# Use Ansible Vault to encrypt the passwords in production environments
 nextcloud_db_root_password: mysecretrootpassword
+
+##################################
+####### Redis server
+##################################
 
 # Version tag for the Redis image from docker.io
 nextcloud_redis_version: 8.4.2-alpine3.22
