@@ -229,10 +229,9 @@
     - name: Cleanup trusted domains list
       become: true
       vars:
-        trusted_domains_list: "{{ nextcloud_trusted_domains_default + nextcloud_trusted_domains }}"
         trusted_domains_to_remove: >
           {{ (nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json)
-            | difference(trusted_domains_list) }}
+            | difference(nextcloud_trusted_domains) }}
       community.docker.docker_container_exec:
         container: nextcloud
         user: abc
@@ -253,13 +252,12 @@
       become: true
       vars:
         nc_trusted_domains_list: "{{ nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json }}"
-        trusted_domains_list: "{{ nextcloud_trusted_domains_default + nextcloud_trusted_domains }}"
       community.docker.docker_container_exec:
         container: nextcloud
         user: abc
         command: >
           php /app/www/public/occ config:system:set trusted_domains {{ idx }} --value='{{ item }}'
-      loop: "{{ trusted_domains_list }}"
+      loop: "{{ nextcloud_trusted_domains }}"
       loop_control:
         index_var: idx
         label: "{{ item }}"

@@ -34,7 +34,7 @@ The role uses the following variables:
 | `nextcloud_http_port` | External HTTP port to expose Nextcloud | `7070` |
 | `nextcloud_https_port` | External HTTPS port to expose Nextcloud | `7071` |
 | `nextcloud_data_volume` | Path to the Nextcloud data volume on the host | *check defaults* |
-| `nextcloud_trusted_domains` | Trusted domains for Nextcloud (should match URLs used to access Nextcloud) | *empty* |
+| `nextcloud_trusted_domains` | Trusted domains for Nextcloud (should match URLs used to access Nextcloud) | *check defaults* |
 | `nextcloud_admin_password` | Admin password for the initial Nextcloud setup | `admin` |
 | `nextcloud_password_policy_enabled` | Enable or disable password policy (checking password strength) | `false` |
 | `nextcloud_users` | List of Nextcloud users to create | *check defaults* |

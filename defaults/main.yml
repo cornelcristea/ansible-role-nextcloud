@@ -21,9 +21,11 @@ nextcloud_https_port: 7071
 nextcloud_data_volume: "{{ nextcloud_host_volume }}/data"
 
 # Trusted domains for Nextcloud (should match the URLs used to access Nextcloud)
-# by default, the inventory hostname, ansible_host, and localhost are included as trusted domains
-# examples: nextcloud.homelab.local, nextcloud*,
-nextcloud_trusted_domains: []
+nextcloud_trusted_domains:
+  - "{{ ansible_host }}"
+  - "{{ ansible_hostname }}"
+  - nextcloud.homelab.local
+  - nextcloud*
 
 # Admin password for the initial Nextcloud setup
 # Use Ansible Vault to encrypt the passwords in production environments
