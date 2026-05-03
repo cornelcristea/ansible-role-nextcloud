@@ -83,7 +83,35 @@
       --admin-pass "{{ nextcloud_admin_password }}"
   when: not nc_installed
 
-- name: Block - Thumbail generation tasks
+- name: Block - Redis configuration tasks
+  block:
+    - name: Check Redis configuration
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get redis host
+      register: nc_redis_host
+      changed_when: false
+      failed_when: false
+
+    - name: Configure Redis
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: >
+          bash -c "
+            php /app/www/public/occ config:system:set redis host --value='nextcloud-redis' &&
+            php /app/www/public/occ config:system:set redis port --value='{{ nextcloud_redis_port }}' --type=integer &&
+            php /app/www/public/occ config:system:set redis timeout --value='1.5' --type=double &&
+            php /app/www/public/occ config:system:set redis password --value='' &&
+            php /app/www/public/occ config:system:set memcache.local --value='\OC\Memcache\Redis' &&
+            php /app/www/public/occ config:system:set memcache.locking --value='\OC\Memcache\Redis'
+          "
+      when: nc_redis_host.stdout != 'nextcloud-redis'
+      changed_when: false
+
+- name: Block - Preview generation tasks
   block:
     - name: Check preview status
       become: true
@@ -127,6 +155,57 @@
         label: "{{ item }}"
       when:
         - item not in preview_providers_list
+
+- name: Block - Trusted domains tasks
+  tags: update_trusted_domains
+  block:
+    - name: Get current trusted domains
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get trusted_domains --output=json
+      register: nc_trusted_domains
+      changed_when: false
+      failed_when: false
+
+    - name: Cleanup trusted domains list
+      become: true
+      vars:
+        trusted_domains_to_remove: >
+          {{ (nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json)
+            | difference(nextcloud_trusted_domains) }}
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:delete trusted_domains
+      when: trusted_domains_to_remove | length > 0
+
+    - name: Refresh trusted domains list
+      become: true
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: php /app/www/public/occ config:system:get trusted_domains --output=json
+      register: nc_trusted_domains
+      changed_when: false
+      failed_when: false
+
+    - name: Add trusted domains
+      become: true
+      vars:
+        nc_trusted_domains_list: "{{ nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json }}"
+      community.docker.docker_container_exec:
+        container: nextcloud
+        user: abc
+        command: >
+          php /app/www/public/occ config:system:set trusted_domains {{ idx }} --value='{{ item }}'
+      loop: "{{ nextcloud_trusted_domains }}"
+      loop_control:
+        index_var: idx
+        label: "{{ item }}"
+      when:
+        - item not in nc_trusted_domains_list
 
 - name: Block - SMTP configuration taks
   tags: update_smtp
@@ -184,85 +263,6 @@
       when:
         - nextcloud_smtp_enabled
         - nc_smtpmode.stdout != 'smtp'
-
-- name: Block - Redis configuration tasks
-  block:
-    - name: Check Redis configuration
-      community.docker.docker_container_exec:
-        container: nextcloud
-        user: abc
-        command: php /app/www/public/occ config:system:get redis host
-      register: nc_redis_host
-      changed_when: false
-      failed_when: false
-
-    - name: Configure Redis
-      become: true
-      community.docker.docker_container_exec:
-        container: nextcloud
-        user: abc
-        command: >
-          bash -c "
-            php /app/www/public/occ config:system:set redis host --value='nextcloud-redis' &&
-            php /app/www/public/occ config:system:set redis port --value='{{ nextcloud_redis_port }}' --type=integer &&
-            php /app/www/public/occ config:system:set redis timeout --value='1.5' --type=double &&
-            php /app/www/public/occ config:system:set redis password --value='' &&
-            php /app/www/public/occ config:system:set memcache.local --value='\OC\Memcache\Redis' &&
-            php /app/www/public/occ config:system:set memcache.locking --value='\OC\Memcache\Redis'
-          "
-      when: nc_redis_host.stdout != 'nextcloud-redis'
-      changed_when: false
-
-- name: Block - Trusted domains tasks
-  tags: update_trusted_domains
-  block:
-    - name: Get current trusted domains
-      become: true
-      community.docker.docker_container_exec:
-        container: nextcloud
-        user: abc
-        command: php /app/www/public/occ config:system:get trusted_domains --output=json
-      register: nc_trusted_domains
-      changed_when: false
-      failed_when: false
-
-    - name: Cleanup trusted domains list
-      become: true
-      vars:
-        trusted_domains_to_remove: >
-          {{ (nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json)
-            | difference(nextcloud_trusted_domains) }}
-      community.docker.docker_container_exec:
-        container: nextcloud
-        user: abc
-        command: php /app/www/public/occ config:system:delete trusted_domains
-      when: trusted_domains_to_remove | length > 0
-
-    - name: Refresh trusted domains list
-      become: true
-      community.docker.docker_container_exec:
-        container: nextcloud
-        user: abc
-        command: php /app/www/public/occ config:system:get trusted_domains --output=json
-      register: nc_trusted_domains
-      changed_when: false
-      failed_when: false
-
-    - name: Add trusted domains
-      become: true
-      vars:
-        nc_trusted_domains_list: "{{ nc_trusted_domains.stdout | default('[]') | regex_replace('^$', '[]') | from_json }}"
-      community.docker.docker_container_exec:
-        container: nextcloud
-        user: abc
-        command: >
-          php /app/www/public/occ config:system:set trusted_domains {{ idx }} --value='{{ item }}'
-      loop: "{{ nextcloud_trusted_domains }}"
-      loop_control:
-        index_var: idx
-        label: "{{ item }}"
-      when:
-        - item not in nc_trusted_domains_list
 
 - name: Block - Application management tasks
   tags: update_apps
